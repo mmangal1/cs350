@@ -10,6 +10,8 @@
 #include <sys/stat.h>
 #include <ctype.h>
 
+int level;
+
 int check_digit(char *optarg){
 	int index = 0;
 	while(optarg[index] != '\0'){
@@ -22,7 +24,8 @@ int check_digit(char *optarg){
 }
 
 void signal_handler(int signal){
-
+	printf("EXITING: Level %d process with pid = %d child of = %d\n", level+1, getpid(), getppid());
+	exit(0);
 }
 
 void child_function(){
@@ -70,13 +73,13 @@ int main(int argc, char* argv[]){
 	//incrementing shared memory pointer
 	ptr += sizeof(int);
 
-	int level = num_procs;
+	level = num_procs;
 
-	pid_t pid;
-	printf("level %d child %d parent %d\n", num_procs, getpid(), getppid());
+	printf("ALIVE: Level %d process with pid = %d child of = %d\n", num_procs, getpid(), getppid());
 	for(int i = 0; i < num_procs-1; i++){
 		int pfds[2];
 		char buf[30];
+		pid_t pid;
 		if(pipe(pfds) == -1){
 			perror("pipe");
 			exit(1);
@@ -89,11 +92,12 @@ int main(int argc, char* argv[]){
 			fprintf(stderr,"Forking error\n");
 			exit(1);
 		}else if(pid == 0){
-			printf("level %d child %d parent %d\n", num_procs-i-1, getpid(), getppid());
-			int pid = getpid();
+			printf("ALIVE: Level %d process with pid = %d child of = %d\n", num_procs-i-1, getpid(), getppid());
+			pid = getpid();
 		
 			//shared memory:	
-			memcpy(ptr, &top_level_pid, sizeof(int));
+			memcpy(ptr, &pid, sizeof(int));
+		
 			//incrementing shared memory pointer
 			ptr += sizeof(int);
 
@@ -105,12 +109,13 @@ int main(int argc, char* argv[]){
 			}
 
 			if(atoi(buf) == 1){
+				level = 0;
 				fd = open(myFifo, O_WRONLY);
-				write(fd, "Leaf final level reached", sizeof("Leaf final level reached"));
+				write(fd, "Last level", sizeof("Last level"));
 				close(fd);
-				child_function();	
+				unlink(myFifo);
+			//	child_function();
 			}
-			unlink(myFifo);				
 			
 		}else{
 			close(pfds[0]); //close the read end
@@ -128,7 +133,36 @@ int main(int argc, char* argv[]){
 	if(top_level_pid != getpid()){
 		child_function();
 	}else{
+
+		sleep(1);
+		//read message from last level
+		char msg[30];
+		fd = open(myFifo, O_RDONLY);
+		if(read(fd, msg, 10) == -1){
+			perror("Could not read message from named pipe\n");
+			exit(1);
+		}
+		close(fd);
+		unlink(myFifo);
 		
+		//else, succeed -- proceed to print out shared memory and exit each process
+		
+		//print shared memory:
+		ptr = start_ptr;
+		
+		for(int i = 0; i < num_procs; i++){
+			printf("%d\n", ((int*)ptr)[i]);
+		}
+	
+		printf("EXITING: Level %d process with pid = %d child of = %d\n", num_procs, getpid(), getppid());
+		for(int i = 1; i < num_procs; i++){
+			kill(((int*)ptr)[i], SIGUSR1);
+		}
+
+		shm_unlink(name);
+	
+		
+			
 	}
 	wait(NULL);	
 
